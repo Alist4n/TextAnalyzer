@@ -1,0 +1,12 @@
+[project]
+name = "textanalyzer"
+version = "0.1.0"
+description = "Морфологический, синтаксический и эмоциональный анализ русских текстов"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "model: тесты с нейросетевой моделью эмоций (медленнее, нужна папка models/)",
+]

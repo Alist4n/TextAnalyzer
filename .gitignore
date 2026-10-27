@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# модели скачиваются скриптами; NRC EmoLex распространять нельзя
+models/
+out/
+build/
+dist/
+*.log
+*.part
+# PyCharm пересоздаёт проект из pyproject.toml; общие конфигурации запуска — в .run/
+.idea/

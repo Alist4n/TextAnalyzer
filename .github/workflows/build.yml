@@ -1,0 +1,60 @@
+# Сборка TextAnalyzer для Windows и macOS на серверах GitHub (запуск вручную: вкладка Actions →
+# «Сборка» → Run workflow). Готовые архив .zip и образ .dmg — в разделе Artifacts запуска.
+# NRC EmoLex в сборку не входит (лицензия запрещает распространение).
+name: Сборка
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            torch_index: https://download.pytorch.org/whl/cpu
+          - os: macos-14        # Apple Silicon
+            torch_index: https://pypi.org/simple
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Зависимости
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url ${{ matrix.torch_index }}
+          python -m pip install -r requirements.txt -r packaging/requirements-build.txt
+          python -m spacy download ru_core_news_md
+          python scripts/download_models.py
+      - name: Тесты
+        run: python -m pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Сборка
+        run: python -m PyInstaller --noconfirm --clean packaging/textanalyzer.spec
+      - name: Проверка и архив (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          dist\TextAnalyzer\TextAnalyzer-cli.exe analyze --text "Как же я рад тебя видеть!" --lexicon manual --formats json -o dist\selftest --name selftest
+          python packaging/make_zip.py
+        shell: cmd
+      - name: Проверка и образ (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          dist/TextAnalyzer.app/Contents/MacOS/TextAnalyzer-cli analyze --text "Как же я рад тебя видеть!" --lexicon manual --formats json -o dist/selftest --name selftest
+          VERSION=$(python -c "import textanalyzer; print(textanalyzer.__version__)")
+          mkdir -p dist/dmg
+          cp -R dist/TextAnalyzer.app dist/dmg/
+          cp packaging/README-dist.txt dist/dmg/README.txt
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname TextAnalyzer -srcfolder dist/dmg -ov -format UDZO "dist/TextAnalyzer-$VERSION-macos-arm64.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TextAnalyzer-${{ runner.os }}
+          path: |
+            dist/*.zip
+            dist/*.dmg
+          if-no-files-found: error

@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Отчёт TextAnalyzer — {{ corpus.created[:10] }}</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1f2933; --muted: #66727f; --line: #e3e6ea;
+    --accent: #4a6fa5; --accent-soft: #e8eef7;
+    {% for lab in ALL_LABELS %}--emo-{{ lab }}: {{ EMOTION_COLORS[lab] }};{% endfor %}
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; }
+  header.top { background: #26323f; color: #fff; padding: 22px 32px; }
+  header.top .top-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; }
+  header.top h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
+  header.top .meta { color: #c9d2dc; font-size: 13px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 6px; }
+  .toolbar button { font: inherit; font-size: 13px; color: #fff; background: rgba(255,255,255,.1);
+                    border: 1px solid rgba(255,255,255,.3); border-radius: 6px; padding: 4px 12px; cursor: pointer; }
+  .toolbar button:hover { background: rgba(255,255,255,.2); }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 32px 60px; }
+  nav.toc { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 18px; margin-bottom: 24px;
+            display: flex; flex-wrap: wrap; gap: 4px 18px; }
+  nav.toc a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+  h2 { margin: 0 0 4px; font-size: 21px; }
+  h3 { margin: 28px 0 12px; font-size: 17px; padding-bottom: 6px; border-bottom: 2px solid var(--accent-soft); }
+  /* сворачиваемые разделы: .box — крупный раздел (текст, сводка), .sub — подраздел внутри него */
+  details.box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 28px; }
+  details.box > summary, details.sub > summary { list-style: none; cursor: pointer; color: var(--ink); font-weight: 400;
+                                                 display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+  details.box > summary::-webkit-details-marker, details.sub > summary::-webkit-details-marker { display: none; }
+  details.box > summary::before, details.sub > summary::before {
+    content: "▸"; color: var(--muted); display: inline-block; width: 14px; transition: transform .15s; }
+  details.box[open] > summary::before, details.sub[open] > summary::before { transform: rotate(90deg); }
+  details.box > summary:hover::before, details.sub > summary:hover::before { color: var(--accent); }
+  details.box > summary { margin: 0; padding: 18px 26px; }
+  details.box[open] > summary { padding-bottom: 6px; }
+  details.box > summary h2 { margin: 0; }
+  details.box > .body { padding: 0 26px 22px 26px; }
+  details.box[open] > summary .when-closed { display: none; }
+  .when-closed { color: var(--muted); font-size: 13px; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+  .when-closed .ebar { width: 160px; margin: 0; }
+  details.sub > summary { margin: 22px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--accent-soft); }
+  details.sub:not([open]) > summary { margin-bottom: 0; }
+  details.sub > summary h3 { margin: 0; padding: 0; border: none; }
+  summary .count { color: var(--muted); font-size: 13px; }
+  h4 { margin: 18px 0 8px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .source { color: var(--muted); font-size: 13px; word-break: break-all; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
+  .card { background: var(--bg); border-radius: 8px; padding: 10px 12px; }
+  .card .v { font-size: 20px; font-weight: 600; }
+  .card .k { font-size: 12px; color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px 28px; align-items: start; }
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: start; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--bg); font-weight: 600; position: sticky; top: 0; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  table.sortable th { cursor: pointer; user-select: none; }
+  table.sortable th[data-dir="asc"]::after { content: " ▲"; font-size: 10px; }
+  table.sortable th[data-dir="desc"]::after { content: " ▼"; font-size: 10px; }
+  td .ebar { width: 140px; margin: 6px 0; }
+  .scroll { max-height: 560px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  details > summary { cursor: pointer; color: var(--accent); font-weight: 600; margin: 10px 0; }
+  .chip { display: inline-block; padding: 2px 9px; border-radius: 12px; background: var(--bg); margin: 2px 3px 2px 0; font-size: 13px; }
+  .chip b { font-weight: 600; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: var(--accent-soft); color: #2f4f7f; margin-right: 4px; }
+  .badge.emo { color: #fff; }
+  .sent { border-top: 1px solid var(--line); padding: 10px 0; }
+  .sent .num { color: var(--muted); font-size: 12px; margin-right: 6px; }
+  .sent .body { font-size: 15.5px; margin: 2px 0 6px; }
+  .sent .info { font-size: 13px; color: var(--muted); }
+  .sent .info b { color: var(--ink); font-weight: 600; }
+  .tree { overflow-x: auto; padding: 6px 0; background: #fbfcfd; border: 1px solid var(--line); border-radius: 8px; margin-top: 6px; }
+  .tree svg { font-size: 13px; }
+  mark.emo { background: none; color: inherit; border-bottom: 3px solid; padding: 0 1px; cursor: help; }
+  {% for lab in EMOTIONS %}mark.emo-{{ lab }} { border-color: var(--emo-{{ lab }}); }{% endfor %}
+  mark.neg { text-decoration: line-through; text-decoration-color: #999; border-bottom-style: dotted; }
+  .ebar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; width: 260px; max-width: 100%; background: var(--line); margin: 4px 0; }
+  .ebar span { display: block; height: 100%; }
+  .legend span { display: inline-block; margin-right: 12px; font-size: 13px; }
+  .legend.small span { font-size: 12px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  /* графики на HTML/CSS */
+  .chart { margin: 4px 0 16px; }
+  .chart-title { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+  .bars { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; font-size: 13px; }
+  .bar-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+  .bar-track { height: 14px; background: var(--bg); border-radius: 3px; overflow: hidden; min-width: 60px; }
+  .bar-fill { display: block; height: 100%; border-radius: 3px; min-width: 1px; }
+  .bar-value { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+  svg.dyn { width: 100%; height: auto; display: block; }
+  svg.dyn text { font-size: 11px; fill: var(--muted); }
+  svg.dyn line.grid { stroke: var(--line); }
+  /* компактные разделы для большого числа текстов */
+  details.compact { border-top: 1px solid var(--line); }
+  details.compact > summary { list-style: none; color: var(--ink); font-weight: 400; margin: 0; padding: 8px 4px;
+                              display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
+  details.compact > summary::-webkit-details-marker { display: none; }
+  details.compact > summary::before { content: "▸"; color: var(--muted); width: 10px; }
+  details.compact[open] > summary::before { content: "▾"; }
+  details.compact .cnum { color: var(--muted); font-size: 13px; }
+  details.compact .cmeta { color: var(--muted); font-size: 13px; }
+  details.compact .ebar { width: 160px; margin: 0; }
+  details.compact .cbody { padding: 0 4px 12px 22px; }
+  .note { font-size: 13px; color: var(--muted); }
+  .muted { color: var(--muted); }
+  footer { max-width: 1180px; margin: 0 auto; padding: 0 32px 40px; font-size: 13px; color: var(--muted); }
+  footer h3 { color: var(--ink); }
+  @media (max-width: 720px) {
+    header.top { padding: 16px; }
+    main { padding: 16px 16px 40px; }
+    footer { padding: 0 16px 32px; }
+    details.box > summary { padding: 14px 16px 6px; }
+    details.box > .body { padding: 0 16px 16px; }
+    .grid2 { grid-template-columns: 1fr; }
+    .bar-label { max-width: 140px; }
+  }
+  @media print { body { background: #fff; } details.box { border: none; } .toolbar { display: none; } .scroll { max-height: none; overflow: visible; } }
+</style>
+</head>
+<body>
+
+{# ============================== МАКРОСЫ ============================== #}
+
+{% macro leading_label(t) %}
+{%- if t.emotions and t.emotions.leading_emotion -%}
+{{ EMOTION_RU[t.emotions.leading_emotion] }} ({{ t.emotions.profile[t.emotions.leading_emotion]|pct }})
+{%- elif t.emotions and t.emotions.profile -%}нейтрально
+{%- else -%}—{%- endif -%}
+{% endmacro %}
+
+{% macro stats_cards(t) %}
+  <div class="cards">
+    <div class="card"><div class="v">{{ t.stats.n_words|num }}</div><div class="k">слов</div></div>
+    <div class="card"><div class="v">{{ t.stats.n_sentences|num }}</div><div class="k">предложений</div></div>
+    <div class="card"><div class="v">{{ t.stats.n_paragraphs|num }}</div><div class="k">абзацев</div></div>
+    <div class="card"><div class="v">{{ t.stats.n_chars|num }}</div><div class="k">символов ({{ t.stats.n_chars_no_spaces|num }} без пробелов)</div></div>
+    <div class="card"><div class="v">{{ t.stats.n_unique_lemmas|num }}</div><div class="k">уникальных лемм</div></div>
+    <div class="card"><div class="v">{{ t.stats.avg_sentence_len }}</div><div class="k">слов в предложении (сред.)</div></div>
+    <div class="card"><div class="v">{{ t.stats.avg_word_len }}</div><div class="k">букв в слове (сред.)</div></div>
+    <div class="card"><div class="v">{{ t.stats.mattr }}</div><div class="k">лексическое разнообразие (MATTR)</div></div>
+    <div class="card"><div class="v">{{ t.stats.lexical_density|pct }}</div><div class="k">знаменательных слов</div></div>
+  </div>
+{% endmacro %}
+
+{% macro sentence_block(s, show_tree) %}
+    <div class="sent">
+      <div class="body"><span class="num">{{ s.index + 1 }}</span>{{ highlight_sentence(s) }}</div>
+      {% if s.emotion %}{{ emotion_bar(s.emotion) }}{% endif %}
+      <div class="info">
+        {% if s.purpose %}<span class="badge">{{ s.purpose }}</span>{% endif %}
+        {% if s.exclamatory %}<span class="badge">восклицательное</span>{% endif %}
+        {% if s.structure %}<span class="badge">{{ s.structure }}{% if s.composition %}, {{ s.composition }}{% endif %}</span>{% endif %}
+        {% if s.emotion_dominant %}<span class="badge emo" style="background:var(--emo-{{ s.emotion_dominant }})">{{ EMOTION_RU[s.emotion_dominant] }} {{ s.emotion[s.emotion_dominant]|pct }}</span>{% endif %}
+        {% if s.bases %}<div>Грамматическая основа: <b>{{ format_bases(s.bases) }}</b></div>{% endif %}
+        {% if s.participial %}<div>Причастные обороты: {% for p in s.participial %}«{{ p }}»{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+        {% if s.adverbial %}<div>Деепричастные обороты: {% for p in s.adverbial %}«{{ p }}»{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+        {% if s.homogeneous %}<div>Однородные члены: {% for g in s.homogeneous %}[{{ g|join(", ") }}]{% if not loop.last %} {% endif %}{% endfor %}</div>{% endif %}
+      </div>
+      {% if show_tree %}
+      <details><summary style="font-weight:400;font-size:13px">Дерево зависимостей</summary><div class="tree">{{ dep_tree_svg(s) }}</div></details>
+      {% endif %}
+    </div>
+{% endmacro %}
+
+{% macro text_full(t, tid, numbered, opts) %}
+<details class="box text" id="text-{{ tid }}" open>
+  <summary>
+    <h2>{% if numbered %}{{ tid }}. {% endif %}{{ t.name }}</h2>
+    <span class="when-closed">{{ t.stats.n_words|num }} слов · {{ leading_label(t) }}{% if t.emotions and t.emotions.profile %} {{ emotion_bar(t.emotions.profile) }}{% endif %}</span>
+  </summary>
+  <div class="body">
+  {% if t.source %}<div class="source">{{ t.source }}</div>{% endif %}
+  <details class="sub" open>
+    <summary><h3>Общие показатели</h3></summary>
+    {{ stats_cards(t) }}
+  </details>
+
+  {# ------------------------------ ЭМОЦИИ ------------------------------ #}
+  {% if t.emotions %}
+  {% set e = t.emotions %}
+  <details class="sub" open>
+  <summary><h3>Эмоции</h3>{% if e.leading_emotion %}<span class="count">ведущая — {{ EMOTION_RU[e.leading_emotion] }}</span>{% endif %}</summary>
+  <div class="cards">
+    {% if e.dominant %}
+    <div class="card"><div class="v" style="color:var(--emo-{{ e.dominant }})">{{ EMOTION_RU[e.dominant] }}</div><div class="k">преобладающее состояние (модель)</div></div>
+    {% endif %}
+    {% if e.leading_emotion %}
+    <div class="card"><div class="v" style="color:var(--emo-{{ e.leading_emotion }})">{{ EMOTION_RU[e.leading_emotion] }}</div><div class="k">ведущая эмоция: {{ e.profile[e.leading_emotion]|pct(1) }}</div></div>
+    {% endif %}
+    {% if e.lexicon_totals is not none %}
+    <div class="card"><div class="v" {% if e.lexicon_dominant %}style="color:var(--emo-{{ e.lexicon_dominant }})"{% endif %}>{{ EMOTION_RU[e.lexicon_dominant] if e.lexicon_dominant else "—" }}</div><div class="k">преобладает в лексике (словарь)</div></div>
+    {% endif %}
+    {% if e.sentence_share %}
+    <div class="card"><div class="v">{{ (1 - e.sentence_share.get(NEUTRAL, 0))|pct }}</div><div class="k">предложений с выраженной эмоцией</div></div>
+    {% endif %}
+  </div>
+  <div class="grid2">
+    {% if e.profile %}<div>{{ emotion_hbars(e.profile, "Эмоциональный профиль (модель)") }}</div>{% endif %}
+    {% if e.lexicon_totals and e.lexicon_totals.values()|sum > 0 %}
+    <div>{{ emotion_hbars(e.lexicon_totals, "Эмоциональная лексика (словарь, сумма весов)", percent=false, labels=EMOTIONS) }}</div>
+    {% endif %}
+  </div>
+  {{ dynamics_svg(t.sentences) }}
+
+  {% if e.lexicon_top %}
+  <h4>Эмоциональные слова (словарь)</h4>
+  <div class="grid3">
+    {% for emo in EMOTIONS if emo in e.lexicon_top %}
+    <div>
+      <div><span class="badge emo" style="background:var(--emo-{{ emo }})">{{ EMOTION_RU[emo] }}</span></div>
+      {% for w, c in e.lexicon_top[emo] %}<span class="chip">{{ w }} <b>{{ c }}</b></span>{% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if e.lexicon_negated %}
+  <p class="note">С отрицанием (не учитывались): {% for w, c in e.lexicon_negated %}<span class="chip">{{ w }} <b>{{ c }}</b></span>{% endfor %}</p>
+  {% endif %}
+  </details>
+  {% endif %}
+
+  {# ---------------------------- МОРФОЛОГИЯ ---------------------------- #}
+  {% if t.pos_distribution %}
+  <details class="sub" open>
+  <summary><h3>Морфология</h3></summary>
+  <div class="grid2">
+    <div>{{ hbars(t.pos_distribution.items(), "Части речи") }}</div>
+    <div>
+      <table>
+        <tr><th>Часть речи</th><th class="n">Кол-во</th><th class="n">Доля</th></tr>
+        {% set total_words = t.pos_distribution.values()|sum %}
+        {% for pos, c in t.pos_distribution.items() %}
+        <tr><td>{{ pos }}</td><td class="n">{{ c }}</td><td class="n">{{ (c / total_words)|pct(1) }}</td></tr>
+        {% endfor %}
+      </table>
+      <p class="note">Морфологическая омонимия: {{ t.ambiguity_rate|pct(1) }} словоформ имеют несколько вариантов разбора (снята по контексту).</p>
+    </div>
+  </div>
+
+  {% if t.feature_distributions %}
+  <h4>Грамматические категории</h4>
+  <div class="grid3">
+    {% for title, dist in t.feature_distributions.items() %}
+    <div>
+      <table>
+        <tr><th>{{ title }}</th><th class="n">Кол-во</th></tr>
+        {% for v, c in dist.items() %}<tr><td>{{ v }}</td><td class="n">{{ c }}</td></tr>{% endfor %}
+      </table>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if t.top_lemmas %}
+  <h4>Частотный словарь (без служебных слов)</h4>
+  <div class="grid3">
+    {% for key, title in [("all", "Все знаменательные"), ("NOUN", "Существительные"), ("VERB", "Глаголы"), ("ADJ", "Прилагательные"), ("ADV", "Наречия"), ("PROPN", "Имена собственные")] if key in t.top_lemmas %}
+    <div>
+      <table>
+        <tr><th>{{ title }}</th><th class="n">Частота</th></tr>
+        {% for w, c in t.top_lemmas[key] %}<tr><td>{{ w }}</td><td class="n">{{ c }}</td></tr>{% endfor %}
+      </table>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if t.unknown_words %}
+  <h4>Слова вне словаря</h4>
+  <p class="note">Не найдены в словаре OpenCorpora — неологизмы, редкие слова, жаргон или опечатки:</p>
+  <div>{% for w, c in t.unknown_words %}<span class="chip">{{ w }}{% if c > 1 %} <b>{{ c }}</b>{% endif %}</span>{% endfor %}</div>
+  {% endif %}
+
+  {% set rows = all_tokens(t) %}
+  <details>
+    <summary>Морфологический разбор по словам ({{ [rows|length, opts.max_token_rows_html]|min }}{% if rows|length > opts.max_token_rows_html %} из {{ rows|length }}{% endif %} токенов)</summary>
+    <div class="scroll">
+    <table>
+      <tr><th class="n">№</th><th>Словоформа</th><th>Лемма</th><th>Часть речи</th><th>Грамматические признаки</th><th>Синт. связь</th><th>Член предложения</th></tr>
+      {% for tok in rows[:opts.max_token_rows_html] if not tok.is_punct %}
+      <tr><td class="n">{{ loop.index }}</td><td>{{ tok.text }}</td><td>{{ tok.lemma }}</td><td>{{ tok.pos_ru }}</td><td>{{ tok.feats_ru }}</td><td title="{{ tok.dep }}">{{ tok.dep_ru }}</td><td>{{ tok.member }}</td></tr>
+      {% endfor %}
+    </table>
+    </div>
+  </details>
+  </details>
+  {% endif %}
+
+  {# ----------------------------- СИНТАКСИС ---------------------------- #}
+  {% if t.syntax_summary %}
+  {% set sx = t.syntax_summary %}
+  <details class="sub" open>
+  <summary><h3>Синтаксис</h3></summary>
+  <div class="cards">
+    <div class="card"><div class="v">{{ sx.complex_share|pct }}</div><div class="k">сложных предложений</div></div>
+    <div class="card"><div class="v">{{ sx.avg_clauses }}</div><div class="k">частей в предложении (сред.)</div></div>
+    <div class="card"><div class="v">{{ sx.avg_depth }}</div><div class="k">глубина дерева (сред.; макс. {{ sx.max_depth }})</div></div>
+    <div class="card"><div class="v">{{ sx.mean_dep_distance }}</div><div class="k">средняя длина зависимости</div></div>
+    <div class="card"><div class="v">{{ sx.participial_count }}</div><div class="k">причастных оборотов</div></div>
+    <div class="card"><div class="v">{{ sx.adverbial_count }}</div><div class="k">деепричастных оборотов</div></div>
+    <div class="card"><div class="v">{{ sx.homogeneous_count }}</div><div class="k">рядов однородных членов</div></div>
+    <div class="card"><div class="v">{{ sx.exclamatory_share|pct }}</div><div class="k">восклицательных</div></div>
+  </div>
+  <div class="grid2">
+    <div>
+      <table>
+        <tr><th>По цели высказывания</th><th class="n">Кол-во</th></tr>
+        {% for k, v in t.purpose_distribution.items() %}<tr><td>{{ k }}</td><td class="n">{{ v }}</td></tr>{% endfor %}
+      </table>
+      <br>
+      <table>
+        <tr><th>По строению</th><th class="n">Кол-во</th></tr>
+        {% for k, v in t.structure_distribution.items() %}<tr><td>{{ k }}</td><td class="n">{{ v }}</td></tr>{% endfor %}
+      </table>
+    </div>
+    <div>{{ hbars(dep_items(t), "Синтаксические связи (топ-15)", color="#6A8D73") }}</div>
+  </div>
+  </details>
+  {% endif %}
+
+  {# ---------------------------- ПРЕДЛОЖЕНИЯ --------------------------- #}
+  {# длинные тексты — свёрнуто, чтобы не прокручивать сотни предложений #}
+  <details class="sub" {% if t.sentences|length <= 80 %}open{% endif %}>
+    <summary><h3>Предложения</h3><span class="count">{{ t.sentences|length }}</span></summary>
+    {% if t.emotions and t.emotions.profile %}
+    <div class="legend">{% for lab in ALL_LABELS %}<span><i style="background:var(--emo-{{ lab }})"></i>{{ EMOTION_RU[lab] }}</span>{% endfor %}</div>
+    {% endif %}
+    {% for s in t.sentences %}
+    {{ sentence_block(s, t.syntax_summary and loop.index <= opts.max_trees) }}
+    {% endfor %}
+    {% if t.syntax_summary and t.sentences|length > opts.max_trees %}
+    <p class="note">Деревья зависимостей показаны для первых {{ opts.max_trees }} предложений (настройка «деревьев на текст»). Полная разметка — в JSON-отчёте.</p>
+    {% endif %}
+  </details>
+
+  {# ------------------------------ СУЩНОСТИ ---------------------------- #}
+  {% if t.entities %}
+  <details class="sub" open>
+  <summary><h3>Именованные сущности</h3><span class="count">{{ t.entities|length }}</span></summary>
+  <div class="grid3">
+    {% for lab, title in [("PER", "Персоны"), ("LOC", "Места"), ("ORG", "Организации")] %}
+    {% set ents = t.entities|selectattr("label", "equalto", lab)|list %}
+    {% if ents %}
+    <div><table><tr><th>{{ title }}</th><th class="n">Упом.</th></tr>
+      {% for en in ents[:opts.top_n] %}<tr><td>{{ en.text }}</td><td class="n">{{ en.count }}</td></tr>{% endfor %}
+    </table></div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  </details>
+  {% endif %}
+  <p class="note" style="margin-top:18px">Время анализа: {{ t.elapsed }} с</p>
+  </div>
+</details>
+{% endmacro %}
+
+{% macro text_compact(t, tid) %}
+<details class="compact" id="text-{{ tid }}">
+  <summary>
+    <span class="cnum">{{ tid }}.</span>
+    <b>{{ t.name }}</b>
+    <span class="cmeta">{{ t.stats.n_words|num }} слов · {{ leading_label(t) }}</span>
+    {% if t.emotions and t.emotions.profile %}{{ emotion_bar(t.emotions.profile) }}{% endif %}
+  </summary>
+  <div class="cbody">
+    {% if t.source %}<div class="source">{{ t.source }}</div>{% endif %}
+    <p class="note">
+      Предложений: {{ t.stats.n_sentences }} · MATTR: {{ t.stats.mattr }}
+      {% if t.emotions and t.emotions.lexicon_dominant %} · в лексике преобладает: {{ EMOTION_RU[t.emotions.lexicon_dominant] }}{% endif %}
+      {% if t.entities %} · сущности: {% for en in t.entities[:5] %}{{ en.text }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+    </p>
+    {% for s in t.sentences %}{{ sentence_block(s, false) }}{% endfor %}
+  </div>
+</details>
+{% endmacro %}
+
+{# ============================== СТРАНИЦА ============================== #}
+
+{% set n = corpus.texts|length %}
+<header class="top">
+  <div class="top-row">
+  <div>
+  <h1>Лингвистический анализ текста</h1>
+  <div class="meta">
+    {{ corpus.created.replace("T", " ") }} · текстов: {{ n }} · время анализа: {{ corpus.elapsed }} с ·
+    TextAnalyzer {{ corpus.app_version }}
+  </div>
+  </div>
+  <div class="toolbar">
+    <button type="button" data-toggle="expand" title="Раскрыть все разделы и подразделы">Развернуть всё</button>
+    <button type="button" data-toggle="collapse" title="Оставить только заголовки разделов">Свернуть всё</button>
+    <button type="button" data-toggle="collapse-sub" title="Свернуть подразделы (эмоции, морфология, синтаксис…) внутри текстов">Свернуть подразделы</button>
+  </div>
+  </div>
+</header>
+<main>
+
+{% if n > 1 %}
+<nav class="toc">
+  <a href="#summary">Сводка</a>
+  <a href="#overview">Все тексты вместе</a>
+  {% if n <= detailed %}
+    {% for t in corpus.texts %}<a href="#text-{{ loop.index }}">{{ loop.index }}. {{ t.name }}</a>{% endfor %}
+  {% else %}
+    {% if detailed > 0 %}<a href="#text-1">Подробные разделы (тексты 1–{{ detailed }})</a>{% endif %}
+    <a href="#compact">Остальные тексты ({{ n - detailed }})</a>
+  {% endif %}
+</nav>
+
+<details class="box" id="summary" open>
+  <summary><h2>Сводка по текстам</h2><span class="count">{{ n }} текстов</span></summary>
+  <div class="body">
+  <p class="note">Щёлкните по заголовку столбца, чтобы отсортировать; по названию текста — чтобы перейти к его разбору.</p>
+  <div class="scroll">
+  <table class="sortable">
+    <thead><tr>
+      <th class="n">№</th><th>Текст</th><th class="n">Слов</th><th class="n">Предл.</th>
+      <th class="n">MATTR</th><th class="n">Сложных предл.</th><th>Преобладает</th><th>Ведущая эмоция</th><th>По словарю</th><th>Эмоции</th>
+    </tr></thead>
+    <tbody>
+    {% for t in corpus.texts %}
+    {% set e = t.emotions %}
+    <tr>
+      <td class="n">{{ loop.index }}</td>
+      <td><a href="#text-{{ loop.index }}">{{ t.name }}</a></td>
+      <td class="n">{{ t.stats.n_words|num }}</td>
+      <td class="n">{{ t.stats.n_sentences|num }}</td>
+      <td class="n">{{ t.stats.mattr }}</td>
+      <td class="n">{{ (t.syntax_summary.complex_share or 0)|pct }}</td>
+      <td>{% if e and e.dominant %}{{ EMOTION_RU[e.dominant] }}{% else %}—{% endif %}</td>
+      <td>{{ leading_label(t) }}</td>
+      <td>{% if e and e.lexicon_dominant %}{{ EMOTION_RU[e.lexicon_dominant] }}{% else %}—{% endif %}</td>
+      <td data-v="{{ e.profile[e.leading_emotion] if e and e.leading_emotion else 0 }}">{% if e and e.profile %}{{ emotion_bar(e.profile) }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  </div>
+</details>
+
+<details class="box" id="overview" open>
+  <summary>
+    <h2>Все тексты вместе</h2>
+    <span class="when-closed">{{ overview.n_words|num }} слов{% if overview.profile %} {{ emotion_bar(overview.profile) }}{% endif %}</span>
+  </summary>
+  <div class="body">
+  <div class="cards">
+    <div class="card"><div class="v">{{ overview.n_texts|num }}</div><div class="k">текстов</div></div>
+    <div class="card"><div class="v">{{ overview.n_words|num }}</div><div class="k">слов</div></div>
+    <div class="card"><div class="v">{{ overview.n_sentences|num }}</div><div class="k">предложений</div></div>
+    <div class="card"><div class="v">{{ overview.avg_words }}</div><div class="k">слов в тексте (сред.)</div></div>
+  </div>
+  <div class="grid2">
+    {% if overview.leading_counts %}
+    <div>{{ emotion_hbars(overview.leading_counts, "Тексты по ведущей эмоции (" ~ overview.leading_source ~ ")", percent=false) }}
+      <p class="note">«Нейтрально» — в тексте почти нет эмоций (ни одна не набирает 10%).</p></div>
+    {% endif %}
+    {% if overview.profile %}<div>{{ emotion_hbars(overview.profile, "Средний эмоциональный профиль (с учётом длины текстов)") }}</div>{% endif %}
+    {% if overview.pos_distribution %}<div>{{ hbars(overview.pos_distribution.items(), "Части речи во всех текстах") }}</div>{% endif %}
+    {% if overview.top_lemmas %}<div>{{ hbars(overview.top_lemmas, "Частые слова во всех текстах (без служебных)", color="#6A8D73") }}</div>{% endif %}
+  </div>
+  {% if overview.lexicon_top %}
+  <h4>Эмоциональные слова во всех текстах (словарь)</h4>
+  <div class="grid3">
+    {% for emo in EMOTIONS if emo in overview.lexicon_top %}
+    <div>
+      <div><span class="badge emo" style="background:var(--emo-{{ emo }})">{{ EMOTION_RU[emo] }}</span></div>
+      {% for w, c in overview.lexicon_top[emo] %}<span class="chip">{{ w }} <b>{{ c }}</b></span>{% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  </div>
+</details>
+{% endif %}
+
+{% for t in corpus.texts %}
+  {% if n == 1 or loop.index <= detailed %}
+    {{ text_full(t, loop.index, n > 1, opts) }}
+  {% else %}
+    {% if loop.index == detailed + 1 %}
+<details class="box" id="compact" open>
+  <summary><h2>{% if detailed > 0 %}Остальные тексты{% else %}Тексты{% endif %}</h2><span class="count">{{ n - detailed }}</span></summary>
+  <div class="body">
+  <p class="note">
+    {% if detailed > 0 %}Подробные разделы с графиками и таблицами построены для первых {{ detailed }} текстов
+    (настройка «Подробных разделов»).{% endif %}
+    Здесь — компактно: щёлкните по тексту, чтобы раскрыть разбор его предложений. Полные данные — в JSON-отчёте.
+  </p>
+  {% if ALL_LABELS %}<div class="legend">{% for lab in ALL_LABELS %}<span><i style="background:var(--emo-{{ lab }})"></i>{{ EMOTION_RU[lab] }}</span>{% endfor %}</div>{% endif %}
+    {% endif %}
+  {{ text_compact(t, loop.index) }}
+    {% if loop.last %}
+  </div>
+</details>
+    {% endif %}
+  {% endif %}
+{% endfor %}
+</main>
+
+<footer>
+  <details class="sub" open id="method">
+  <summary><h3>Методика</h3></summary>
+  <p><b>Морфология и синтаксис:</b> {{ corpus.models.get("spacy", "spaCy") }} — разметка Universal Dependencies;
+  части речи переведены в термины школьной грамматики (причастие и деепричастие выделены отдельно).
+  Леммы — pymorphy3 (словарь OpenCorpora). Члены предложения и тип сложного предложения выводятся из дерева
+  зависимостей эвристически: грамматическая основа надёжна, второстепенные члены — приближённо.</p>
+  {% if corpus.models.get("emotions") %}
+  <p><b>Эмоции (модель):</b> {{ corpus.models.emotions }} — мультиметочный классификатор предложений, обученный на корпусе CEDR.
+  Профиль текста — средние вероятности по предложениям, взвешенные по их длине. Вероятности разных эмоций независимы
+  (предложение может выражать несколько эмоций сразу).</p>
+  {% endif %}
+  {% if corpus.models.get("lexicon") %}
+  <p><b>Эмоции (словарь):</b> {{ corpus.models.lexicon }}. Учитываются отрицания («не рад», «без страха») и
+  усилители/ослабители («очень», «немного») по дереву зависимостей. Наведите курсор на подчёркнутое слово, чтобы увидеть вклад.</p>
+  {% if corpus.models.get("lexicon_credit") %}
+  <p class="note">{{ corpus.models.lexicon_credit }} Вес слова — доля английских слов-источников перевода, связанных
+  с эмоцией. Перевод машинный, связи слов с эмоциями размечены для английского языка — возможны ошибки.
+  Страница словаря: <a href="https://saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm">saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm</a>.</p>
+  {% elif corpus.models.get("lexicon_note") %}
+  <p class="note">{{ corpus.models.lexicon_note }}</p>
+  {% endif %}
+  {% endif %}
+  <p><b>MATTR</b> — среднее отношение
+  уникальных лемм к числу слов в скользящем окне 50 слов (не зависит от длины текста).</p>
+  </details>
+  {# справочник длинный и нужен редко — по умолчанию свёрнут #}
+  <details class="sub" id="glossary">
+  <summary><h3>Обозначения на деревьях зависимостей</h3></summary>
+  <p>
+  {% for short, desc in dep_glossary() %}<span class="chip"><b>{{ short }}</b> — {{ desc }}</span>{% endfor %}
+  </p>
+  </details>
+</footer>
+
+<script>
+// сортировка сводной таблицы по щелчку на заголовке
+document.querySelectorAll("table.sortable").forEach(function (table) {
+  var body = table.tBodies[0];
+  table.querySelectorAll("thead th").forEach(function (th, col) {
+    th.addEventListener("click", function () {
+      var asc = th.dataset.dir !== "asc";
+      table.querySelectorAll("thead th").forEach(function (h) { delete h.dataset.dir; });
+      th.dataset.dir = asc ? "asc" : "desc";
+      var value = function (row) {
+        var cell = row.children[col];
+        var raw = cell.dataset.v !== undefined ? cell.dataset.v : cell.textContent.trim();
+        var num = parseFloat(raw.replace(/\s/g, "").replace(",", "."));
+        return isNaN(num) ? raw.toLowerCase() : num;
+      };
+      Array.from(body.rows)
+        .sort(function (a, b) {
+          var x = value(a), y = value(b);
+          return (x > y ? 1 : x < y ? -1 : 0) * (asc ? 1 : -1);
+        })
+        .forEach(function (row) { body.appendChild(row); });
+    });
+  });
+});
+// кнопки «Развернуть всё» / «Свернуть всё» / «Свернуть подразделы»
+function setOpen(selector, open) {
+  document.querySelectorAll(selector).forEach(function (d) { d.open = open; });
+}
+var toggles = {
+  // свёрнутые компактные тексты и деревья не трогаем: их сотни, раскрываются по одному
+  "expand": function () { setOpen("details.box, details.sub", true); },
+  // только заголовки разделов; подразделы остаются раскрытыми, чтобы открытый текст был виден сразу
+  "collapse": function () { setOpen("details.box", false); },
+  "collapse-sub": function () { setOpen("details.box", true); setOpen("details.sub", false); }
+};
+document.querySelectorAll("[data-toggle]").forEach(function (button) {
+  button.addEventListener("click", toggles[button.dataset.toggle]);
+});
+// переход по ссылке раскрывает цель и все свёрнутые разделы вокруг неё
+function openTarget() {
+  var id = decodeURIComponent(location.hash.slice(1));
+  var el = id && document.getElementById(id);
+  if (!el) return;
+  for (var node = el; node; node = node.parentElement) {
+    if (node.tagName === "DETAILS") node.open = true;
+  }
+  el.scrollIntoView();
+}
+window.addEventListener("hashchange", openTarget);
+// повторный щелчок по той же ссылке не меняет адрес — раскрываем вручную
+document.addEventListener("click", function (event) {
+  var link = event.target.closest && event.target.closest('a[href^="#"]');
+  if (link && link.getAttribute("href") === location.hash) openTarget();
+});
+// при печати всё раскрыто, иначе свёрнутые разделы не попадут на бумагу
+window.addEventListener("beforeprint", toggles.expand);
+openTarget();
+</script>
+</body>
+</html>

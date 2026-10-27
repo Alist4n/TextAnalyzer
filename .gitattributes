@@ -1,0 +1,9 @@
+# В репозитории — переводы строк LF; .bat всегда с CRLF (cmd неверно читает LF), .sh — с LF.
+* text=auto
+*.bat text eol=crlf
+*.sh text eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.docx binary
+*.xlsx binary
