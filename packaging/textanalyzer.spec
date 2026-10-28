@@ -13,6 +13,7 @@
 программа скачивает его сама (меню «Файл» или TextAnalyzer-cli download-nrc).
 """
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -91,6 +92,28 @@ def _needed(dest: str) -> bool:
 
 a.datas = [entry for entry in a.datas if _needed(entry[0])]
 a.binaries = [entry for entry in a.binaries if _needed(entry[0])]
+
+if sys.platform == "win32":
+    # Библиотеки Visual C++ (VC++ Redistributable) кладём в сборку сами: на компьютере без
+    # свежего VC++ Redistributable PyTorch иначе не загружается («WinError 126 … shm.dll»).
+    # PyInstaller берёт только DLL, нужные самому Python (версии из его установки), а
+    # vcruntime140_threads.dll, нужную torch_cpu.dll, не берёт вовсе. Берём один комплект
+    # из System32 — он новее, а библиотеки VC++ совместимы только «старое с новым».
+    SYSTEM32 = Path(os.environ["SystemRoot"]) / "System32"
+    VC_RUNTIME = ("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threads.dll",
+                  "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "msvcp140_atomic_wait.dll")
+    missing = [name for name in VC_RUNTIME if not (SYSTEM32 / name).exists()]
+    if missing:
+        raise SystemExit("Нет " + ", ".join(missing) + " в System32: установите Microsoft Visual C++ "
+                         "Redistributable x64 (https://aka.ms/vs/17/release/vc_redist.x64.exe)")
+    a.binaries = [entry for entry in a.binaries if entry[0].lower() not in VC_RUNTIME]
+    for name in VC_RUNTIME:
+        a.binaries.append((name, str(SYSTEM32 / name), "BINARY"))
+    # torch загружает свои DLL из torch/lib, и их зависимости ищутся в этой папке и в System32,
+    # а не в _internal (в командной строке PySide6 не загружает VC++ заранее) — копия и туда
+    for name in VC_RUNTIME:
+        a.binaries.append((f"torch/lib/{name}", str(SYSTEM32 / name), "BINARY"))
+
 pyz = PYZ(a.pure)  # noqa: F821
 
 

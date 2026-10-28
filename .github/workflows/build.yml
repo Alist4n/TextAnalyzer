@@ -38,6 +38,7 @@ jobs:
       - name: Проверка и архив (Windows)
         if: runner.os == 'Windows'
         run: |
+          python packaging/check_dlls.py dist\TextAnalyzer
           dist\TextAnalyzer\TextAnalyzer-cli.exe analyze --text "Как же я рад тебя видеть!" --lexicon manual --formats json -o dist\selftest --name selftest
           python packaging/make_zip.py
         shell: cmd

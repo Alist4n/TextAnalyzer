@@ -14,4 +14,6 @@ if not exist models\rubert-tiny2-cedr-emotion-detection\config.json (
 )
 .venv\Scripts\python -m pip install -q -r packaging\requirements-build.txt || exit /b 1
 .venv\Scripts\python -m PyInstaller --noconfirm --clean packaging\textanalyzer.spec || exit /b 1
+rem every DLL must be in the build or in Windows itself (not only in this PC's System32)
+.venv\Scripts\python packaging\check_dlls.py dist\TextAnalyzer || exit /b 1
 .venv\Scripts\python packaging\make_zip.py || exit /b 1
